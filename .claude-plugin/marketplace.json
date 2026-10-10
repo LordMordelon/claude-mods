@@ -1,0 +1,11 @@
+{
+  "name": "claude-mods",
+  "owner": { "name": "Angel (Vremia)" },
+  "plugins": [
+    {
+      "name": "tarea-progreso",
+      "source": "./tarea-progreso",
+      "description": "Panel con el avance de la tarea en curso (issue de GitHub) y reporte para corregir CLAUDE.md cuando algo no se logra"
+    }
+  ]
+}
