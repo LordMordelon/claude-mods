@@ -4,7 +4,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Incidente, Tarea } from '../types'
-import { PASOS, avance, barra, corto, criterios, esBloqueo, incidentePaso, leerComando, reporte, repositorio } from './logica'
+import { PASOS, avance, barra, corto, criterios, esBloqueo, incidentePaso, leerComando, ramaDeTarea, reporte, repositorio } from './logica'
 
 const HERRAMIENTA = 'mcp__tarea-progreso__progreso'
 
@@ -81,9 +81,27 @@ const EJEMPLO: Tarea = {
   reporte: 'storage/reporte-claude-tarea-0.md (ejemplo, no se escribe)',
 }
 
-/** Abre (o trae al frente) el panel de la tarea. Una superficie que no lo dibuja no es un error. */
-function abrirPanel($: EngineInterface, numero: number | null): void {
-  $.ui.open({ id: PANEL, title: numero === null ? 'Progreso de la tarea' : `Tarea #${numero}` }).catch(() => undefined)
+/**
+ * Abre (o trae al frente) el panel de la tarea. Una superficie que no lo dibuja no es un error, pero se dice por que:
+ * devuelve el motivo que da el motor cuando el panel queda abierto sin dibujar (pantalla angosta, o una pantalla
+ * conectada que no dibuja paneles), o null si se ve.
+ */
+async function abrirPanel($: EngineInterface, numero: number | null): Promise<string | null> {
+  try {
+    const r = await $.ui.open({ id: PANEL, title: numero === null ? 'Progreso de la tarea' : `Tarea #${numero}` })
+    return r.isPlaced ? null : r.reason
+  } catch (error) {
+    return `no se pudo abrir (${String(error)})`
+  }
+}
+
+/** La rama en que esta la carpeta, o '' si no se puede saber. */
+async function ramaActual($: EngineInterface): Promise<string> {
+  try {
+    return (await $.process.run(['git', 'branch', '--show-current'])).stdout.trim()
+  } catch {
+    return ''
+  }
 }
 
 async function hora($: EngineInterface): Promise<string> {
@@ -124,7 +142,7 @@ export const register: Register = on => {
       }
     }
     // Siempre a la vista: el panel se abre en cada conversacion, con la tarea en curso o esperando una.
-    abrirPanel($, vista?.numero ?? null)
+    void abrirPanel($, vista?.numero ?? null)
     return r
   })
 
@@ -140,7 +158,13 @@ export const register: Register = on => {
           if (actual === null || actual.numero !== l.numero) {
             const tarea = await cargarTarea($, l.numero)
             await guardar($, tarea)
-            abrirPanel($, tarea.numero)
+            void abrirPanel($, tarea.numero)
+          }
+          // En la nube la rama la trae la sesion y no se crea una tarea/N-…: si ya se esta en la rama de la tarea al
+          // marcarla en curso, el paso esta hecho.
+          const t = vista
+          if (t !== null && t.pasos.rama !== 'ok' && ramaDeTarea(await ramaActual($), t.numero)) {
+            await guardar($, { ...t, pasos: { ...t.pasos, rama: 'ok' } })
           }
         } else if (l.tipo === 'paso') {
           // Un paso que ya salio bien no vuelve a falla por un intento posterior (correr un grupo de pruebas, por ej.).
@@ -206,10 +230,12 @@ export const register: Register = on => {
   on('command.run', { command: 'progreso' }, async ($, e) => {
     const pedido = e.args.trim()
     // Para ver el panel sin empezar una tarea: datos de ejemplo, sin ramas ni GitHub. Una tarea real los reemplaza.
+    // Si la pantalla no dibuja el panel, el texto lo dice con el motivo del motor, para saber que arreglar.
+    const nota = (motivo: string | null): string => (motivo === null ? '' : `\nPanel: no se ve en esta pantalla. Motivo: ${motivo}`)
     if (pedido === 'demo') {
       await guardar($, EJEMPLO)
-      abrirPanel($, EJEMPLO.numero)
-      return { text: 'Panel de ejemplo abierto (tarea #0). «/progreso limpiar» lo quita; una tarea real lo reemplaza.' }
+      const motivo = await abrirPanel($, EJEMPLO.numero)
+      return { text: `Panel de ejemplo abierto (tarea #0). «/progreso limpiar» lo quita; una tarea real lo reemplaza.${nota(motivo)}` }
     }
     if (pedido === 'limpiar') {
       vista = null
@@ -218,9 +244,9 @@ export const register: Register = on => {
       return { text: 'Sin tarea en curso.' }
     }
     const tarea = vista
-    abrirPanel($, tarea?.numero ?? null)
+    const motivo = await abrirPanel($, tarea?.numero ?? null)
     if (tarea === null) {
-      return { text: 'No hay una tarea en curso. La barra empieza sola al crear la rama tarea/<N>-… (skill tarea).' }
+      return { text: `No hay una tarea en curso. La barra empieza sola al crear la rama tarea/<N>-… o marcar la tarea en curso (skill tarea).${nota(motivo)}` }
     }
     const a = avance(tarea)
     const lineas = [
@@ -236,7 +262,7 @@ export const register: Register = on => {
       })
     }
     lineas.push(tarea.incidentes.length === 0 ? 'Sin incidentes.' : `${tarea.incidentes.length} incidente(s): ${tarea.reporte ?? 'reporte sin escribir'}`)
-    return { text: lineas.join('\n') }
+    return { text: lineas.join('\n') + nota(motivo) }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANEL }, async ($, e) => {
