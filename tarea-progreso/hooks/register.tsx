@@ -4,7 +4,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Incidente, Tarea } from '../types'
-import { PASOS, avance, barra, corto, criterios, esBloqueo, incidentePaso, leerComando, ramaDeTarea, reporte, repositorio } from './logica'
+import { PASOS, avance, barra, cambios, corto, criterios, esBloqueo, incidentePaso, leerComando, ramaDeTarea, reporte, repositorio } from './logica'
 
 const HERRAMIENTA = 'mcp__tarea-progreso__progreso'
 
@@ -17,10 +17,17 @@ const PANEL = 'tarea-progreso'
  */
 let vista: Tarea | null = null
 
-/** Guarda la tarea y redibuja el panel. */
+/**
+ * Guarda la tarea, redibuja el panel y deja en el chat una linea por cada cosa que cambio: la app y la web de Claude no
+ * dibujan el panel, pero si las lineas de $.ui.log (Angel no usa la terminal).
+ */
 async function guardar($: EngineInterface, tarea: Tarea): Promise<void> {
+  const antes = vista
   vista = tarea
   $.ui.invalidate('ui.render')
+  for (const linea of cambios(antes, tarea)) {
+    $.ui.log(linea)
+  }
   try {
     await $.state.set({ plugin: 'tarea-progreso', key: 'tarea' }, tarea)
   } catch {
@@ -144,6 +151,16 @@ export const register: Register = on => {
     // Siempre a la vista: el panel se abre en cada conversacion, con la tarea en curso o esperando una.
     void abrirPanel($, vista?.numero ?? null)
     return r
+  })
+
+  // «tarea N» escrito por la persona: el panel se abre en respuesta a su pedido, y asi se dibuja en cualquier pantalla
+  // que dibuje paneles (abierto por el mod solo, espera una terminal ancha). Las lineas del chat no dependen de esto.
+  on('prompt.submit', async ($, e, next) => {
+    const pedido = /^\s*(?:toma (?:la )?)?tarea\s+(\d+)\b/i.exec(e.text)
+    if (pedido !== null) {
+      void abrirPanel($, Number(pedido[1]))
+    }
+    return next(e)
   })
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {

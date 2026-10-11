@@ -131,6 +131,47 @@ export function avance(tarea: Tarea): { hechos: number; total: number; siguiente
   return { hechos, total: PASOS.length, siguiente }
 }
 
+/**
+ * Lo que cambio entre dos estados de la tarea, en lineas para el chat: la app y la web de Claude no dibujan el panel, y
+ * Angel sigue las sesiones ahi. Una linea por criterio o paso que cambio; al empezar, una con la tarea; al terminar el
+ * cierre, una que lo dice. Nada si no cambio nada (redibujar no repite lineas).
+ */
+export function cambios(antes: Tarea | null, despues: Tarea): string[] {
+  const t = `Tarea #${despues.numero}`
+  if (antes === null || antes.numero !== despues.numero) {
+    const titulo = despues.titulo !== '' ? ` · ${despues.titulo}` : ''
+    const criterios = despues.criterios.length > 0 ? `${despues.criterios.length} criterios y ` : ''
+    return [`📋 ${t}${titulo} · ${criterios}${PASOS.length} pasos de cierre`]
+  }
+  const lineas: string[] = []
+  const total = despues.criterios.length
+  const cumplidos = Object.values(despues.criteriosEstado).filter(x => x === 'hecho').length
+  despues.criterios.forEach((texto, i) => {
+    const estado = despues.criteriosEstado[i]
+    if (estado !== undefined && estado !== antes.criteriosEstado[i]) {
+      lineas.push(estado === 'hecho'
+        ? `✅ ${t} · Criterio ${i + 1} de ${total}: ${recorte(texto)} · criterios ${cumplidos}/${total}`
+        : `❌ ${t} · Criterio ${i + 1} de ${total} no se pudo: ${recorte(texto)} · criterios ${cumplidos}/${total}`)
+    }
+  })
+  const a = avance(despues)
+  for (const p of PASOS) {
+    const estado = despues.pasos[p.id]
+    if (estado !== undefined && estado !== antes.pasos[p.id]) {
+      lineas.push(estado === 'ok' ? `✅ ${t} · ${p.nombre} · cierre ${a.hechos}/${a.total}` : `❌ ${t} · ${p.nombre}: no se logró · cierre ${a.hechos}/${a.total}`)
+    }
+  }
+  if (a.hechos === a.total && avance(antes).hechos < a.total) {
+    lineas.push(`🏁 ${t}: cierre completo`)
+  }
+  return lineas
+}
+
+/** Un criterio largo, cortado para que la linea quepa en el celular. */
+function recorte(texto: string): string {
+  return texto.length > 90 ? `${texto.slice(0, 89)}…` : texto
+}
+
 export function barra(hechos: number, total: number): string {
   return '▰'.repeat(hechos) + '▱'.repeat(Math.max(0, total - hechos))
 }
