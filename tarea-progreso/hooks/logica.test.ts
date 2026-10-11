@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Tarea } from '../types'
-import { avance, barra, criterios, esBloqueo, incidentePaso, leerComando, reporte, repositorio } from './logica'
+import { avance, barra, criterios, esBloqueo, incidentePaso, leerComando, ramaDeTarea, reporte, repositorio } from './logica'
 
 const tarea = (pasos: Tarea['pasos'] = {}): Tarea => ({
   numero: 125, titulo: 'Cron fuera de la hora punta', repo: 'LordMordelon/licitaciones-vremia', criterios: ['a', 'b'],
@@ -17,6 +17,14 @@ test('la rama tarea/N-... empieza a seguir la tarea N y marca la rama', () => {
 test('marcar la tarea en curso tambien la empieza; quitar la etiqueta no', () => {
   expect(leerComando("gh api $R/issues/121/labels -f 'labels[]=en-curso'", '', false)[0]).toEqual({ tipo: 'inicio', numero: 121 })
   expect(leerComando('gh api -X DELETE $R/issues/121/labels/en-curso', '', false)).toEqual([{ tipo: 'nada' }])
+})
+
+test('la rama de la tarea: la propia tarea/N-… o, en la nube, la que trae la sesion (claude/…)', () => {
+  expect(ramaDeTarea('tarea/110-ficha-orden', 110)).toBe(true)
+  expect(ramaDeTarea('claude/beautiful-wright-fxclpi\n', 110)).toBe(true)
+  expect(ramaDeTarea('tarea/22-correos', 110)).toBe(false)
+  expect(ramaDeTarea('main', 110)).toBe(false)
+  expect(ramaDeTarea('', 110)).toBe(false)
 })
 
 test('pruebas: verde, fallidas y errores de sintaxis', () => {

@@ -50,3 +50,22 @@ test('/progreso demo abre el panel con la tarea de ejemplo, sin tocar nada', asy
   expect(dibujo).toContain('✗ Commit')
   expect(dibujo).toContain('⚠ 1 incidente')
 })
+
+test('en la nube, marcar la tarea en curso en la rama de la sesion (claude/…) marca la rama', async ($, on) => {
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false } as never, text: '' }))
+  on('process.run', (_$, e) => ({
+    value: { exitCode: 0, stderr: '', stdout: e.argv.join(' ').includes('branch') ? 'claude/beautiful-wright-fxclpi\n' : '' },
+  }) as never)
+  on('ui.open', { id: 'tarea-progreso' }, () => ({ value: { isPlaced: true } }) as never)
+  await $.tool.call({ tool: 'Bash', command: "gh api $R/issues/110/labels -f 'labels[]=en-curso'" })
+  const r = await $.command.run({ command: 'progreso', args: '' } as never)
+  expect(String((r as { text?: string }).text)).toContain('✓ Rama de la tarea')
+})
+
+test('/progreso dice por que el panel no se ve cuando la pantalla no lo dibuja', async ($, on) => {
+  on('ui.open', { id: 'tarea-progreso' }, () => ({ value: { isPlaced: false, reason: 'la pantalla conectada no dibuja paneles' } }) as never)
+  const r = await $.command.run({ command: 'progreso', args: 'demo' } as never)
+  const t = String((r as { text?: string }).text)
+  expect(t).toContain('Panel: no se ve en esta pantalla')
+  expect(t).toContain('la pantalla conectada no dibuja paneles')
+})

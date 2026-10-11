@@ -93,6 +93,15 @@ export function leerComando(comando: string, salida: string, conError: boolean):
   return lecturas.length === 0 ? [{ tipo: 'nada' }] : lecturas
 }
 
+/**
+ * La rama en que se trabaja la tarea N: la propia (`tarea/N-…`) o, en la nube, la que trae la sesion (`claude/…`): la
+ * skill `tarea` dice trabajar en esa, y ahi no se crea una `tarea/N-…` que el mod vea (licitaciones #110).
+ */
+export function ramaDeTarea(rama: string, numero: number): boolean {
+  const r = rama.trim()
+  return r.startsWith(`tarea/${numero}-`) || /^claude\/\S+$/.test(r)
+}
+
 /** Un bloqueo: la persona o un permiso no dejo hacer algo. */
 export function esBloqueo(texto: string): boolean {
   return /permission|denied|doesn't want to proceed|rejected|rechaz|bloque/i.test(texto)
