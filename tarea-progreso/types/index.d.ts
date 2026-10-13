@@ -21,6 +21,8 @@ export type Tarea = {
   incidentes: Incidente[]
   /** Donde quedo el reporte, cuando hay incidentes. */
   reporte: string | null
+  /** El comentario del issue con el avance (#4), una vez creado; las tareas guardadas antes no lo traen. */
+  comentario?: number | null
 }
 
 declare module 'claude-code' {

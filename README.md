@@ -18,9 +18,14 @@ criterio que no se pudo), escribe `storage/reporte-claude-tarea-N.md` con una pr
   cualquier ancho). Si se cierra a mano, no vuelve solo hasta la próxima tarea («tarea N») o `/progreso`.
 - **`/progreso` como tarjeta**, no como texto: el avance con colores y marcas, y los botones «Ver panel» y
   «Apagar seguimiento». `/progreso demo`: un ejemplo. `/progreso limpiar`: lo vacía.
-- **Donde no hay panel** (la app y la web de Claude): mientras el panel no se ve, una línea en el chat por cada
-  avance, como «✅ Tarea #112 · Criterio 2 de 4: Una vez al día · criterios 2/4», y «🏁 cierre completo» al final.
-  Si el panel no se ve, la tarjeta de `/progreso` dice por qué, con el motivo que da Claude Code.
+- **Donde no hay panel** (la app y la web de Claude): una línea en el chat por cada avance, como «✅ Tarea #112 ·
+  Criterio 2 de 4: Una vez al día · criterios 2/4», y «🏁 cierre completo» al final. Sale mientras el panel no se ve
+  en ninguna pantalla y también **mientras haya un celular conectado**, que no dibuja el panel aunque la web o el
+  escritorio sí lo tengan. Si el panel no se ve, la tarjeta de `/progreso` dice por qué, con el motivo que da Claude Code.
+- **El avance en la tarea de GitHub:** un solo comentario en el issue, «Avance de la tarea #N», con los pasos del
+  cierre y los criterios; se crea al empezar y después se edita solo (editar no manda avisos). Se ve desde cualquier
+  celular, con o sin la app de Claude. Necesita `gh` con permiso para comentar; si no lo tiene, todo lo demás sigue
+  igual. Apagado el seguimiento, no se escribe.
 
 ### Activarlo en un proyecto
 
