@@ -37,15 +37,17 @@ async function panelVisible($: EngineInterface): Promise<boolean> {
 }
 
 /**
- * Si el avance va tambien como lineas en el chat: cuando el panel no se ve en ninguna pantalla, y cuando hay un celular
- * conectado (#4), que no dibuja el panel aunque otra pantalla (la web, el escritorio) si lo tenga a la vista.
+ * Si el avance va tambien como lineas en el chat: cuando el panel no se ve en ninguna pantalla, cuando hay un celular
+ * conectado (#4), y cuando no hay ninguna pantalla conectada (una sesion de la nube seguida desde la app): ahi el panel
+ * figura como dibujado aunque nadie lo vea (probado el 13-10-2026).
  */
 async function avisarEnChat($: EngineInterface): Promise<boolean> {
   if (!(await panelVisible($))) {
     return true
   }
   try {
-    return (await $.session.surfaces()).includes('mobile')
+    const pantallas = await $.session.surfaces()
+    return pantallas.length === 0 || pantallas.includes('mobile')
   } catch {
     return false
   }
