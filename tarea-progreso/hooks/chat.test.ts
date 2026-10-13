@@ -71,7 +71,24 @@ test('al escribir «tarea N» se abre el panel: es un pedido de la persona y se 
   on('prompt.submit', (_$, e) => ({ text: e.text }))
   await $.prompt.submit({ text: 'tarea 112' } as never)
   expect(abiertos).toContain('tarea-progreso')
-  abiertos.length = 0
+})
+
+// El chat de VS Code es angosto: un panel que el mod abre solo espera una pantalla ancha. Cada mensaje de la persona lo
+// trae a la vista (asi se dibuja a cualquier ancho), salvo que ya se vea o que ella lo haya cerrado a mano.
+test('cada mensaje trae el panel a la vista si no se ve, y no lo reabre si ya se ve', async ($, on) => {
+  const abiertos: string[] = []
+  let seVe = false
+  on('ui.open', (_$, e) => {
+    abiertos.push((e as { id: string }).id)
+    return { value: { isPlaced: true } } as never
+  })
+  on('ui.panes', () => ({ value: seVe ? [{ id: 'tarea-progreso', isPlaced: true }] : [] }) as never)
+  on('prompt.submit', (_$, e) => ({ text: e.text }))
+
   await $.prompt.submit({ text: 'hola, ¿cómo va?' } as never)
-  expect(abiertos).toEqual([])
+  expect(abiertos).toEqual(['tarea-progreso'])
+
+  seVe = true
+  await $.prompt.submit({ text: 'sigue' } as never)
+  expect(abiertos).toEqual(['tarea-progreso'])
 })

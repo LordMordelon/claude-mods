@@ -1,5 +1,6 @@
-// tarea-progreso: la barra de avance de la tarea en curso (issue de GitHub) sobre el prompt, y un reporte para corregir
+// tarea-progreso: el avance de la tarea en curso (issue de GitHub) en un panel del chat, y un reporte para corregir
 // CLAUDE.md cuando una accion que se esperaba no se logra. Sigue el flujo de las skills `tarea` y `cerrar-tarea`.
+// Esta siempre encendido; «/progreso apagar» (o el boton del panel) lo apaga hasta «/progreso encender».
 
 import type { EngineInterface, Register } from 'claude-code'
 
@@ -17,16 +18,36 @@ const PANEL = 'tarea-progreso'
  */
 let vista: Tarea | null = null
 
+/** El interruptor: encendido salvo que la persona lo apague. Se recuerda entre conversaciones ($.store). */
+let activo = true
+
+/** La persona cerro el panel a mano: no se vuelve a abrir solo hasta la proxima tarea o «/progreso». */
+let cerradoAMano = false
+
+/** Por que el panel no se vio la ultima vez que «/progreso» lo pidio (null: se vio). Lo muestra la tarjeta. */
+let motivoPanel: string | null = null
+
+/** Si el panel se ve ahora. Mientras se ve, el avance va en el panel y no como lineas sueltas en el chat. */
+async function panelVisible($: EngineInterface): Promise<boolean> {
+  try {
+    return (await $.ui.panes()).some(p => p.id === PANEL && p.isPlaced)
+  } catch {
+    return false
+  }
+}
+
 /**
- * Guarda la tarea, redibuja el panel y deja en el chat una linea por cada cosa que cambio: la app y la web de Claude no
- * dibujan el panel, pero si las lineas de $.ui.log (Angel no usa la terminal).
+ * Guarda la tarea y redibuja. Si el panel no se ve (la app o la web de Claude no dibujan paneles), deja en el chat una
+ * linea por cada cosa que cambio, para que el avance no se pierda.
  */
 async function guardar($: EngineInterface, tarea: Tarea): Promise<void> {
   const antes = vista
   vista = tarea
   $.ui.invalidate('ui.render')
-  for (const linea of cambios(antes, tarea)) {
-    $.ui.log(linea)
+  if (!(await panelVisible($))) {
+    for (const linea of cambios(antes, tarea)) {
+      $.ui.log(linea)
+    }
   }
   try {
     await $.state.set({ plugin: 'tarea-progreso', key: 'tarea' }, tarea)
@@ -89,9 +110,9 @@ const EJEMPLO: Tarea = {
 }
 
 /**
- * Abre (o trae al frente) el panel de la tarea. Una superficie que no lo dibuja no es un error, pero se dice por que:
- * devuelve el motivo que da el motor cuando el panel queda abierto sin dibujar (pantalla angosta, o una pantalla
- * conectada que no dibuja paneles), o null si se ve.
+ * Abre (o trae al frente) el panel de la tarea. El chat de VS Code es angosto: un panel que el mod abre solo espera una
+ * pantalla ancha, pero uno abierto en respuesta a la persona (su mensaje, su comando, un boton) se ve a cualquier
+ * ancho. Devuelve el motivo del motor cuando el panel queda abierto sin dibujar, o null si se ve.
  */
 async function abrirPanel($: EngineInterface, numero: number | null): Promise<string | null> {
   try {
@@ -100,6 +121,19 @@ async function abrirPanel($: EngineInterface, numero: number | null): Promise<st
   } catch (error) {
     return `no se pudo abrir (${String(error)})`
   }
+}
+
+/** El interruptor. Apagado: se cierra el panel y no se sigue nada; encendido: vuelve el panel. */
+async function cambiarActivo($: EngineInterface, valor: boolean): Promise<void> {
+  activo = valor
+  await $.store.set('activo', valor).catch(() => undefined)
+  if (valor) {
+    cerradoAMano = false
+    void abrirPanel($, vista?.numero ?? null)
+  } else {
+    await $.ui.close({ id: PANEL }).catch(() => undefined)
+  }
+  $.ui.invalidate('ui.render')
 }
 
 /** La rama en que esta la carpeta, o '' si no se puede saber. */
@@ -113,6 +147,25 @@ async function ramaActual($: EngineInterface): Promise<string> {
 
 async function hora($: EngineInterface): Promise<string> {
   return new Date(await $.clock.now()).toLocaleString('es-CL', { timeZone: 'America/Santiago' })
+}
+
+/** El texto de «/progreso» (lo que queda guardado en el chat y lee el modelo; la tarjeta se dibuja aparte). */
+function resumen(tarea: Tarea): string {
+  const a = avance(tarea)
+  const lineas = [
+    `Tarea #${tarea.numero}${tarea.titulo !== '' ? ` · ${tarea.titulo}` : ''}`,
+    `Cierre ${barra(a.hechos, a.total)} ${a.hechos}/${a.total}`,
+    ...PASOS.map(p => `  ${tarea.pasos[p.id] === 'ok' ? '✓' : tarea.pasos[p.id] === 'falla' ? '✗' : '·'} ${p.nombre}`),
+  ]
+  if (tarea.criterios.length > 0) {
+    lineas.push('Terminado cuando:')
+    tarea.criterios.forEach((c, i) => {
+      const s = tarea.criteriosEstado[i]
+      lineas.push(`  ${s === 'hecho' ? '✓' : s === 'no_se_pudo' ? '✗' : '·'} ${i + 1}. ${c}`)
+    })
+  }
+  lineas.push(tarea.incidentes.length === 0 ? 'Sin incidentes.' : `${tarea.incidentes.length} incidente(s): ${tarea.reporte ?? 'reporte sin escribir'}`)
+  return lineas.join('\n')
 }
 
 export const register: Register = on => {
@@ -135,7 +188,16 @@ export const register: Register = on => {
       },
       isDeferred: false,
     })
-    await $.command.register({ name: 'progreso', description: 'Avance de la tarea en curso y su reporte', argumentHint: '[demo | limpiar]' })
+    await $.command.register({
+      name: 'progreso',
+      description: 'Avance de la tarea en curso; apagar o encender el seguimiento',
+      argumentHint: '[apagar | encender | demo | limpiar]',
+    })
+    try {
+      activo = ((await $.store.get('activo')) as boolean | undefined) ?? true
+    } catch {
+      // Sin store: encendido.
+    }
     try {
       vista ??= (await $.state.get({ plugin: 'tarea-progreso', key: 'tarea' })).value ?? null
     } catch {
@@ -148,23 +210,40 @@ export const register: Register = on => {
         // Sin store: se empieza sin tarea.
       }
     }
-    // Siempre a la vista: el panel se abre en cada conversacion, con la tarea en curso o esperando una.
-    void abrirPanel($, vista?.numero ?? null)
+    // Abierto aqui espera una pantalla ancha; el primer mensaje de la persona lo pone a la vista (prompt.submit).
+    if (activo) {
+      void abrirPanel($, vista?.numero ?? null)
+    }
     return r
   })
 
-  // «tarea N» escrito por la persona: el panel se abre en respuesta a su pedido, y asi se dibuja en cualquier pantalla
-  // que dibuje paneles (abierto por el mod solo, espera una terminal ancha). Las lineas del chat no dependen de esto.
+  // Cada mensaje de la persona trae el panel a la vista: abierto en respuesta a ella, se dibuja tambien en el chat
+  // angosto de VS Code. «tarea N» lo abre siempre, aunque lo haya cerrado antes.
   on('prompt.submit', async ($, e, next) => {
-    const pedido = /^\s*(?:toma (?:la )?)?tarea\s+(\d+)\b/i.exec(e.text)
-    if (pedido !== null) {
-      void abrirPanel($, Number(pedido[1]))
+    if (activo) {
+      const pedido = /^\s*(?:toma (?:la )?)?tarea\s+(\d+)\b/i.exec(e.text)
+      if (pedido !== null) {
+        cerradoAMano = false
+        void abrirPanel($, Number(pedido[1]))
+      } else if (!cerradoAMano && !(await panelVisible($))) {
+        void abrirPanel($, vista?.numero ?? null)
+      }
+    }
+    return next(e)
+  })
+
+  on('ui.close', async ($, e, next) => {
+    if (e.id === PANEL && e.origin.kind === 'person') {
+      cerradoAMano = true
     }
     return next(e)
   })
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const ran = await next(e)
+    if (!activo) {
+      return ran
+    }
     try {
       const texto = ran.text ?? ran.deny ?? ''
       const conError = ran.deny !== undefined || ran.isError === true
@@ -175,6 +254,7 @@ export const register: Register = on => {
           if (actual === null || actual.numero !== l.numero) {
             const tarea = await cargarTarea($, l.numero)
             await guardar($, tarea)
+            cerradoAMano = false
             void abrirPanel($, tarea.numero)
           }
           // En la nube la rama la trae la sesion y no se crea una tarea/N-…: si ya se esta en la rama de la tarea al
@@ -218,6 +298,9 @@ export const register: Register = on => {
 
   on('tool.call', { tool: HERRAMIENTA }, async ($, e) => {
     const entrada = e as unknown as { criterio?: number; estado?: string; nota?: string }
+    if (!activo) {
+      return { result: 'El seguimiento está apagado (Angel lo encendería con «/progreso encender»); no se marcó nada.' }
+    }
     const tarea = vista
     if (tarea === null) {
       return { result: 'No hay una tarea en curso: la barra empieza al crear la rama tarea/<N>-… o marcar la tarea en curso.' }
@@ -244,15 +327,16 @@ export const register: Register = on => {
     return { result: `Criterio ${i + 1} marcado como ${estado}. Van ${hechos} de ${tarea.criterios.length}.` }
   })
 
+  // El texto que devuelve queda guardado en el chat; en pantalla se dibuja la tarjeta (ui.render de CommandOutput).
   on('command.run', { command: 'progreso' }, async ($, e) => {
     const pedido = e.args.trim()
-    // Para ver el panel sin empezar una tarea: datos de ejemplo, sin ramas ni GitHub. Una tarea real los reemplaza.
-    // Si la pantalla no dibuja el panel, el texto lo dice con el motivo del motor, para saber que arreglar.
-    const nota = (motivo: string | null): string => (motivo === null ? '' : `\nPanel: no se ve en esta pantalla. Motivo: ${motivo}`)
-    if (pedido === 'demo') {
-      await guardar($, EJEMPLO)
-      const motivo = await abrirPanel($, EJEMPLO.numero)
-      return { text: `Panel de ejemplo abierto (tarea #0). «/progreso limpiar» lo quita; una tarea real lo reemplaza.${nota(motivo)}` }
+    if (pedido === 'apagar') {
+      await cambiarActivo($, false)
+      return { text: 'Seguimiento apagado. «/progreso encender» lo vuelve a encender.' }
+    }
+    if (pedido === 'encender') {
+      await cambiarActivo($, true)
+      return { text: 'Seguimiento encendido.' }
     }
     if (pedido === 'limpiar') {
       vista = null
@@ -260,63 +344,109 @@ export const register: Register = on => {
       await $.store.delete('tarea').catch(() => undefined)
       return { text: 'Sin tarea en curso.' }
     }
+    if (!activo) {
+      return { text: 'El seguimiento está apagado. «/progreso encender» lo vuelve a encender.' }
+    }
+    // Para ver el panel sin empezar una tarea: datos de ejemplo, sin ramas ni GitHub. Una tarea real los reemplaza.
+    if (pedido === 'demo') {
+      await guardar($, EJEMPLO)
+    }
+    cerradoAMano = false
+    // Si la pantalla no dibuja el panel, se dice con el motivo del motor, para saber que arreglar.
+    motivoPanel = await abrirPanel($, vista?.numero ?? null)
+    const nota = motivoPanel === null ? '' : `\nPanel: no se ve en esta pantalla. Motivo: ${motivoPanel}`
     const tarea = vista
-    const motivo = await abrirPanel($, tarea?.numero ?? null)
     if (tarea === null) {
-      return { text: `No hay una tarea en curso. La barra empieza sola al crear la rama tarea/<N>-… o marcar la tarea en curso (skill tarea).${nota(motivo)}` }
+      return { text: `No hay una tarea en curso. El seguimiento empieza solo con «tarea N» (skill tarea).${nota}` }
     }
-    const a = avance(tarea)
-    const lineas = [
-      `Tarea #${tarea.numero}${tarea.titulo !== '' ? ` · ${tarea.titulo}` : ''}`,
-      `Cierre ${barra(a.hechos, a.total)} ${a.hechos}/${a.total}`,
-      ...PASOS.map(p => `  ${tarea.pasos[p.id] === 'ok' ? '✓' : tarea.pasos[p.id] === 'falla' ? '✗' : '·'} ${p.nombre}`),
-    ]
-    if (tarea.criterios.length > 0) {
-      lineas.push('Terminado cuando:')
-      tarea.criterios.forEach((c, i) => {
-        const s = tarea.criteriosEstado[i]
-        lineas.push(`  ${s === 'hecho' ? '✓' : s === 'no_se_pudo' ? '✗' : '·'} ${i + 1}. ${c}`)
-      })
-    }
-    lineas.push(tarea.incidentes.length === 0 ? 'Sin incidentes.' : `${tarea.incidentes.length} incidente(s): ${tarea.reporte ?? 'reporte sin escribir'}`)
-    return { text: lineas.join('\n') + nota(motivo) }
+    return { text: resumen(tarea) + nota }
   })
 
-  on('ui.render', { component: 'Pane', requestId: PANEL }, async ($, e) => {
-    const { Box, Text } = $.ui.resolve(e)
-    const tarea = vista
-    if (tarea === null) {
-      return <Text dimColor wrap="wrap">Sin tarea en curso. Empieza sola con «tarea N» (al crear la rama tarea/N-…). «/progreso demo» muestra un ejemplo.</Text>
+  // La salida de «/progreso» como tarjeta en el chat (todas las pantallas), con el interruptor a mano.
+  on('ui.render', { component: 'CommandOutput' }, async ($, e, next) => {
+    if (e.props.command !== 'progreso' || e.props.isErrored) {
+      return next(e)
     }
-    const a = avance(tarea)
-    const hechosCrit = Object.values(tarea.criteriosEstado).filter(x => x === 'hecho').length
-    const marca = (s: string | undefined): string => (s === 'ok' || s === 'hecho' ? '✓' : s === 'falla' || s === 'no_se_pudo' ? '✗' : '·')
-    const color = (s: string | undefined): string | undefined =>
-      s === 'ok' || s === 'hecho' ? 'success' : s === 'falla' || s === 'no_se_pudo' ? 'error' : undefined
+    const { Box, Text, Button } = $.ui.resolve(e)
+    const interruptor = activo
+      ? <Button onPress={() => void cambiarActivo($, false)}>Apagar seguimiento</Button>
+      : <Button variant="primary" onPress={() => void cambiarActivo($, true)}>Encender seguimiento</Button>
+    const args = e.props.args.trim()
+    if (!activo || args === 'apagar' || args === 'encender' || args === 'limpiar' || vista === null) {
+      return (
+        <Box flexDirection="column" borderStyle="round" paddingX={1}>
+          <Text>{activo ? '🟢' : '⚪'} {e.props.text}</Text>
+          <Box marginTop={1}>{interruptor}</Box>
+        </Box>
+      )
+    }
     return (
-      <Box flexDirection="column">
-        <Text bold wrap="truncate">Tarea #{tarea.numero}{tarea.titulo !== '' ? ` · ${tarea.titulo}` : ''}</Text>
-        <Text>
-          <Text color={a.hechos === a.total ? 'success' : undefined}>{barra(a.hechos, a.total)}</Text>
-          <Text dimColor> {a.hechos}/{a.total}{a.siguiente !== null ? ` · sigue: ${a.siguiente}` : ' · cierre completo'}</Text>
-        </Text>
-        {PASOS.map(p => (
-          <Text key={p.id} color={color(tarea.pasos[p.id])} dimColor={tarea.pasos[p.id] === undefined}>
-            {marca(tarea.pasos[p.id])} {p.nombre}
-          </Text>
-        ))}
-        {tarea.criterios.length > 0 ? <Text bold>Terminado cuando ({hechosCrit}/{tarea.criterios.length})</Text> : null}
-        {tarea.criterios.map((c, i) => (
-          <Text key={`c${i}`} color={color(tarea.criteriosEstado[i])} dimColor={tarea.criteriosEstado[i] === undefined} wrap="wrap">
-            {marca(tarea.criteriosEstado[i])} {i + 1}. {c}
-          </Text>
-        ))}
-        {tarea.incidentes.length > 0 ? (
-          <Text color="warning" wrap="wrap">
-            ⚠ {tarea.incidentes.length} incidente{tarea.incidentes.length === 1 ? '' : 's'}: {tarea.reporte ?? 'reporte sin escribir'}
-          </Text>
-        ) : null}
+      <Box flexDirection="column" borderStyle="round" paddingX={1}>
+        {tarjeta($, e, vista)}
+        {motivoPanel !== null ? <Text color="warning" wrap="wrap">El panel no se ve en esta pantalla: {motivoPanel}</Text> : null}
+        <Box marginTop={1} gap={1}>
+          <Button variant="primary" onPress={() => void abrirPanel($, vista?.numero ?? null)}>Ver panel</Button>
+          {interruptor}
+        </Box>
       </Box>
     )
   })
+
+  on('ui.render', { component: 'Pane', requestId: PANEL }, async ($, e) => {
+    const { Box, Text, Button } = $.ui.resolve(e)
+    if (!activo) {
+      return (
+        <Box flexDirection="column">
+          <Text dimColor>Seguimiento apagado.</Text>
+          <Button variant="primary" onPress={() => void cambiarActivo($, true)}>Encender seguimiento</Button>
+        </Box>
+      )
+    }
+    const tarea = vista
+    return (
+      <Box flexDirection="column">
+        {tarea === null
+          ? <Text dimColor wrap="wrap">Sin tarea en curso. Empieza sola con «tarea N». «/progreso demo» muestra un ejemplo.</Text>
+          : tarjeta($, e, tarea)}
+        <Box marginTop={1}>
+          <Button onPress={() => void cambiarActivo($, false)}>Apagar seguimiento</Button>
+        </Box>
+      </Box>
+    )
+  })
+}
+
+/** El avance de la tarea, igual en el panel y en la tarjeta de «/progreso». */
+function tarjeta($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0], tarea: Tarea) {
+  const { Box, Text } = $.ui.resolve(e)
+  const a = avance(tarea)
+  const hechosCrit = Object.values(tarea.criteriosEstado).filter(x => x === 'hecho').length
+  const marca = (s: string | undefined): string => (s === 'ok' || s === 'hecho' ? '✓' : s === 'falla' || s === 'no_se_pudo' ? '✗' : '·')
+  const color = (s: string | undefined): string | undefined =>
+    s === 'ok' || s === 'hecho' ? 'success' : s === 'falla' || s === 'no_se_pudo' ? 'error' : undefined
+  return (
+    <Box flexDirection="column">
+      <Text bold wrap="truncate">Tarea #{tarea.numero}{tarea.titulo !== '' ? ` · ${tarea.titulo}` : ''}</Text>
+      <Text>
+        <Text color={a.hechos === a.total ? 'success' : undefined}>{barra(a.hechos, a.total)}</Text>
+        <Text dimColor> {a.hechos}/{a.total}{a.siguiente !== null ? ` · sigue: ${a.siguiente}` : ' · cierre completo'}</Text>
+      </Text>
+      {PASOS.map(p => (
+        <Text key={p.id} color={color(tarea.pasos[p.id])} dimColor={tarea.pasos[p.id] === undefined}>
+          {marca(tarea.pasos[p.id])} {p.nombre}
+        </Text>
+      ))}
+      {tarea.criterios.length > 0 ? <Text bold>Terminado cuando ({hechosCrit}/{tarea.criterios.length})</Text> : null}
+      {tarea.criterios.map((c, i) => (
+        <Text key={`c${i}`} color={color(tarea.criteriosEstado[i])} dimColor={tarea.criteriosEstado[i] === undefined} wrap="wrap">
+          {marca(tarea.criteriosEstado[i])} {i + 1}. {c}
+        </Text>
+      ))}
+      {tarea.incidentes.length > 0 ? (
+        <Text color="warning" wrap="wrap">
+          ⚠ {tarea.incidentes.length} incidente{tarea.incidentes.length === 1 ? '' : 's'}: {tarea.reporte ?? 'reporte sin escribir'}
+        </Text>
+      ) : null}
+    </Box>
+  )
 }

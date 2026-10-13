@@ -10,13 +10,17 @@ la rama `tarea/N-…` o al marcar la tarea `en-curso`; en la nube, donde la sesi
 cuenta como la rama de la tarea. Si una acción esperada no se logra (pruebas rojas, PR que no se crea, un permiso negado, un
 criterio que no se pudo), escribe `storage/reporte-claude-tarea-N.md` con una propuesta para corregir CLAUDE.md.
 
-- **En el chat, en cualquier pantalla** (también la app y la web de Claude, que no dibujan paneles): una línea por cada
-  avance, como «✅ Tarea #112 · Criterio 2 de 4: Una vez al día · criterios 2/4» o «❌ Tarea #112 · Commit: no se
-  logró · cierre 3/8», y «🏁 cierre completo» al final.
-- Escribir «tarea N» abre el panel en las pantallas que lo dibujan (abierto por el mod solo, espera una terminal ancha).
-- `/progreso`: abre el panel y escribe el avance en el chat. `/progreso demo`: un ejemplo. `/progreso limpiar`: lo vacía.
-- Si la pantalla no dibuja el panel (una ventana angosta, o una app conectada a una sesión en la nube que no dibuja
-  paneles), `/progreso` termina con «Panel: no se ve en esta pantalla. Motivo: …», con el motivo que da Claude Code.
+- **Siempre encendido, con interruptor:** `/progreso apagar` (o el botón «Apagar seguimiento» del panel o de la
+  tarjeta) lo apaga: no sigue nada, no escribe reportes y cierra el panel. `/progreso encender` (o el botón) lo vuelve a
+  encender. Se recuerda entre conversaciones.
+- **El panel, a la vista en el chat de VS Code:** el chat es angosto y un panel que el mod abre solo espera una
+  pantalla ancha; por eso cada mensaje de la persona lo trae a la vista (abierto en respuesta a ella, se dibuja a
+  cualquier ancho). Si se cierra a mano, no vuelve solo hasta la próxima tarea («tarea N») o `/progreso`.
+- **`/progreso` como tarjeta**, no como texto: el avance con colores y marcas, y los botones «Ver panel» y
+  «Apagar seguimiento». `/progreso demo`: un ejemplo. `/progreso limpiar`: lo vacía.
+- **Donde no hay panel** (la app y la web de Claude): mientras el panel no se ve, una línea en el chat por cada
+  avance, como «✅ Tarea #112 · Criterio 2 de 4: Una vez al día · criterios 2/4», y «🏁 cierre completo» al final.
+  Si el panel no se ve, la tarjeta de `/progreso` dice por qué, con el motivo que da Claude Code.
 
 ### Activarlo en un proyecto
 
