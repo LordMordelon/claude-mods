@@ -204,3 +204,30 @@ export function corto(texto: string): string {
   const limpio = texto.replace(/\r/g, '').trim()
   return limpio.length > 600 ? limpio.slice(0, 600) + '…' : limpio
 }
+
+/**
+ * El avance como comentario del issue de la tarea (#4): la app de Claude en el celular no dibuja el panel, pero el issue
+ * se ve desde cualquier celular. Un solo comentario que se edita; sin casillas de tarea, para que no se marquen a mano.
+ */
+export function comentario(tarea: Tarea): string {
+  const a = avance(tarea)
+  const marca = (s: string | undefined): string => (s === 'ok' || s === 'hecho' ? '✅' : s === 'falla' || s === 'no_se_pudo' ? '❌' : '⬜')
+  const lineas = [
+    `### Avance de la tarea #${tarea.numero}`,
+    '',
+    `**Cierre** ${barra(a.hechos, a.total)} ${a.hechos}/${a.total} · ${a.siguiente !== null ? `sigue: ${a.siguiente}` : '🏁 cierre completo'}`,
+    '',
+    ...PASOS.map(p => `${marca(tarea.pasos[p.id])} ${p.nombre}  `),
+  ]
+  if (tarea.criterios.length > 0) {
+    const hechos = Object.values(tarea.criteriosEstado).filter(x => x === 'hecho').length
+    lineas.push('', `**Terminado cuando** (${hechos}/${tarea.criterios.length})`, '')
+    tarea.criterios.forEach((c, i) => lineas.push(`${marca(tarea.criteriosEstado[i])} ${i + 1}. ${c}  `))
+  }
+  if (tarea.incidentes.length > 0) {
+    const n = tarea.incidentes.length
+    lineas.push('', `⚠️ ${n} incidente${n === 1 ? '' : 's'}: \`${tarea.reporte ?? 'reporte sin escribir'}\``)
+  }
+  lineas.push('', '---', '_Se actualiza solo con el mod tarea-progreso de Claude Code._')
+  return lineas.join('\n')
+}

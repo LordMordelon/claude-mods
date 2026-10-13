@@ -5,7 +5,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Incidente, Tarea } from '../types'
-import { PASOS, avance, barra, cambios, corto, criterios, esBloqueo, incidentePaso, leerComando, ramaDeTarea, reporte, repositorio } from './logica'
+import { PASOS, avance, barra, cambios, comentario, corto, criterios, esBloqueo, incidentePaso, leerComando, ramaDeTarea, reporte, repositorio } from './logica'
 
 const HERRAMIENTA = 'mcp__tarea-progreso__progreso'
 
@@ -37,18 +37,22 @@ async function panelVisible($: EngineInterface): Promise<boolean> {
 }
 
 /**
- * Guarda la tarea y redibuja. Si el panel no se ve (la app o la web de Claude no dibujan paneles), deja en el chat una
- * linea por cada cosa que cambio, para que el avance no se pierda.
+ * Si el avance va tambien como lineas en el chat: cuando el panel no se ve en ninguna pantalla, y cuando hay un celular
+ * conectado (#4), que no dibuja el panel aunque otra pantalla (la web, el escritorio) si lo tenga a la vista.
  */
-async function guardar($: EngineInterface, tarea: Tarea): Promise<void> {
-  const antes = vista
-  vista = tarea
-  $.ui.invalidate('ui.render')
+async function avisarEnChat($: EngineInterface): Promise<boolean> {
   if (!(await panelVisible($))) {
-    for (const linea of cambios(antes, tarea)) {
-      $.ui.log(linea)
-    }
+    return true
   }
+  try {
+    return (await $.session.surfaces()).includes('mobile')
+  } catch {
+    return false
+  }
+}
+
+/** Guarda la tarea en el estado de la sesion y entre conversaciones, sin redibujar ni avisar. */
+async function persistir($: EngineInterface, tarea: Tarea): Promise<void> {
   try {
     await $.state.set({ plugin: 'tarea-progreso', key: 'tarea' }, tarea)
   } catch {
@@ -56,6 +60,58 @@ async function guardar($: EngineInterface, tarea: Tarea): Promise<void> {
   }
   // Entre conversaciones: un chat nuevo sigue mostrando la tarea en curso.
   await $.store.set('tarea', tarea).catch(() => undefined)
+}
+
+/**
+ * Guarda la tarea y redibuja. Donde el panel no se ve (la app de Claude en el celular, la web) deja en el chat una
+ * linea por cada cosa que cambio, y deja el avance al dia en el comentario del issue, para que no se pierda.
+ */
+async function guardar($: EngineInterface, tarea: Tarea): Promise<void> {
+  const antes = vista
+  vista = tarea
+  $.ui.invalidate('ui.render')
+  if (await avisarEnChat($)) {
+    for (const linea of cambios(antes, tarea)) {
+      $.ui.log(linea)
+    }
+  }
+  await persistir($, tarea)
+  await publicar($)
+}
+
+/** Lo que se esta escribiendo en GitHub: un comentario a la vez, para no crear dos si el avance llega seguido. */
+let publicando: Promise<void> = Promise.resolve()
+
+/**
+ * Deja el avance de la tarea en curso en un solo comentario de su issue (#4): lo crea la primera vez y despues lo edita
+ * (editar no manda avisos). Sin gh, sin red o sin permiso, sigue todo igual: el comentario es una ayuda, no un paso.
+ */
+function publicar($: EngineInterface): Promise<void> {
+  publicando = publicando.then(async () => {
+    const t = vista
+    if (!activo || t === null || t.repo === null || t.numero <= 0) {
+      return
+    }
+    const cuerpo = comentario(t)
+    try {
+      if (t.comentario === undefined || t.comentario === null) {
+        const r = await $.process.run(
+          ['gh', 'api', `repos/${t.repo}/issues/${t.numero}/comments`, '-f', `body=${cuerpo}`, '--jq', '.id'], { timeoutMs: 20000 })
+        const id = Number(r.stdout.trim())
+        const actual = vista
+        if (r.exitCode === 0 && Number.isInteger(id) && id > 0 && actual !== null && actual.numero === t.numero) {
+          vista = { ...actual, comentario: id }
+          await persistir($, vista)
+        }
+      } else {
+        await $.process.run(
+          ['gh', 'api', '-X', 'PATCH', `repos/${t.repo}/issues/comments/${t.comentario}`, '-f', `body=${cuerpo}`], { timeoutMs: 20000 })
+      }
+    } catch {
+      // El comentario es una ayuda: si GitHub no responde, el panel y el chat siguen igual.
+    }
+  })
+  return publicando
 }
 
 /** La tarea N recien empezada: su titulo y sus criterios, del issue. Sin gh o sin red, solo los pasos del cierre. */
