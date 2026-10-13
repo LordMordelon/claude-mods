@@ -81,6 +81,23 @@ test('con un celular conectado, el avance va al chat aunque el panel se vea en o
   expect(lineas).toContain('✅ Tarea #22 · Pruebas en verde · cierre 2/8')
 })
 
+// Probado el 13-10-2026 en una sesion de la nube seguida desde el celular: ninguna pantalla conectada y, aun asi, el
+// panel figuraba como dibujado. El mod creia que se veia y nunca escribia las lineas.
+test('en la nube sin pantallas conectadas, el panel no cuenta como visto: el avance va al chat', async ($, on) => {
+  const lineas: string[] = []
+  on('ui.log', (_$, e) => {
+    lineas.push(e.text)
+    return { value: undefined } as never
+  })
+  on('ui.panes', () => ({ value: [{ id: 'tarea-progreso', isPlaced: true }] }) as never)
+  on('session.surfaces', () => ({ value: [] }) as never)
+  procesos(on, [])
+  bash(on)
+  await $.tool.call({ tool: 'Bash', command: 'git switch -c tarea/22-correos' })
+  await $.tool.call({ tool: 'Bash', command: 'php tests/run.php' })
+  expect(lineas).toContain('✅ Tarea #22 · Pruebas en verde · cierre 2/8')
+})
+
 test('sin celular y con el panel a la vista, el avance no se repite en el chat', async ($, on) => {
   const lineas: string[] = []
   on('ui.log', (_$, e) => {
